@@ -474,31 +474,36 @@ def load_tsv_data(fn, options):
     return labels, texts
 
 
-def encode_data(texts, labels, tokenizer, max_seq_len, replace_span, label_map,
+def encode_data(texts, labels, tokenizer, max_seq_len, label_map,
                 options):
-    tokenized = tokenize_texts(texts, tokenizer)
-    x = encode_tokenized(tokenized, tokenizer, max_seq_len, replace_span)
-    y = np.array([label_map[l] for l in labels])
+    if options.task_name == "NER":
+        tokenized = tokenize_texts(texts, tokenizer)
+        x = encode_tokenized(tokenized, tokenizer, max_seq_len, options.replace_span)
+        y = np.array([label_map[l] for l in labels])
+    else:
+        tokenized = tokenize_texts_re(texts, tokenizer)
+        x = encode_tokenized_re(tokenized, tokenizer, max_seq_len, options.replace_span_A, options.replace_span_B)
+        y = np.array([label_map[l] for l in labels])        
     return x, y
 
-def encode_data_re(texts, labels, tokenizer, max_seq_len, replace_span_A, replace_span_B, label_map,
-                options):
-    tokenized = tokenize_texts_re(texts, tokenizer)
-    x = encode_tokenized_re(tokenized, tokenizer, max_seq_len, replace_span_A, replace_span_B)
-    y = np.array([label_map[l] for l in labels])
-    return x, y
+# def encode_data_re(texts, labels, tokenizer, max_seq_len, replace_span_A, replace_span_B, label_map,
+#                 options):
+#     tokenized = tokenize_texts_re(texts, tokenizer)
+#     x = encode_tokenized_re(tokenized, tokenizer, max_seq_len, replace_span_A, replace_span_B)
+#     y = np.array([label_map[l] for l in labels])
+#     return x, y
 
 @timed
-def load_dataset(fn, tokenizer, max_seq_len, replace_span, label_map, options):
+def load_dataset(fn, tokenizer, max_seq_len, label_map, options):
     labels, texts = load_tsv_data(fn, options)
-    return encode_data(texts, labels, tokenizer, max_seq_len, replace_span,
+    return encode_data(texts, labels, tokenizer, max_seq_len,
                        label_map, options)
 
-@timed
-def load_dataset_re(fn, tokenizer, max_seq_len, replace_span_A, replace_span_B, label_map, options):
-    labels, texts = load_tsv_data(fn, options)
-    return encode_data_re(texts, labels, tokenizer, max_seq_len, replace_span_A, replace_span_B,
-                       label_map, options)
+# @timed
+# def load_dataset_re(fn, tokenizer, max_seq_len, replace_span_A, replace_span_B, label_map, options):
+#     labels, texts = load_tsv_data(fn, options)
+#     return encode_data_re(texts, labels, tokenizer, max_seq_len, replace_span_A, replace_span_B,
+#                        label_map, options)
 
 @timed
 def load_batch_offsets(fn, batch_size):
@@ -534,7 +539,7 @@ def tsv_generator(data_path, tokenizer, label_map, options):
             label, text = parse_tsv_line(l, ln, data_path, options)
             # TODO function to encode single example
             (t, s), y = encode_data([text], [label], tokenizer, max_seq_len,
-                                    replace_span, label_map, options)
+                                    label_map, options)
             yield (t[0], s[0]), y[0]
 
 
@@ -610,7 +615,6 @@ class TsvSequence(Sequence):
         self._label_map = label_map
         self._batch_size = batch_size
         self._max_seq_len = options.max_seq_length
-        self._replace_span = options.replace_span
         self._options = options
         offsets, total = load_batch_offsets(data_path, batch_size)
         self._batch_offsets = offsets
@@ -625,37 +629,37 @@ class TsvSequence(Sequence):
         labels, texts = load_batch_from_tsv(self._data_path, base_ln, offset,
                                             self._batch_size, self._options)
         x, y = encode_data(texts, labels, self._tokenizer, self._max_seq_len,
-                           self._replace_span, self._label_map, self._options)
+                        self._label_map, self._options)      
         return x, y
 
     def __on_epoch_end__(self):
         pass
 
-class TsvSequenceRE(Sequence):
-    def __init__(self, data_path, tokenizer, label_map, batch_size, options):
-        self._data_path = data_path
-        self._tokenizer = tokenizer
-        self._label_map = label_map
-        self._batch_size = batch_size
-        self._max_seq_len = options.max_seq_length
-        self._replace_span_A = options.replace_span_A
-        self._replace_span_B = options.replace_span_B
-        self._options = options
-        offsets, total = load_batch_offsets(data_path, batch_size)
-        self._batch_offsets = offsets
-        self.num_examples = total
+# class TsvSequenceRE(Sequence):
+#     def __init__(self, data_path, tokenizer, label_map, batch_size, options):
+#         self._data_path = data_path
+#         self._tokenizer = tokenizer
+#         self._label_map = label_map
+#         self._batch_size = batch_size
+#         self._max_seq_len = options.max_seq_length
+#         self._replace_span_A = options.replace_span_A
+#         self._replace_span_B = options.replace_span_B
+#         self._options = options
+#         offsets, total = load_batch_offsets(data_path, batch_size)
+#         self._batch_offsets = offsets
+#         self.num_examples = total
 
-    def __len__(self):
-        return len(self._batch_offsets)
+#     def __len__(self):
+#         return len(self._batch_offsets)
 
-    def __getitem__(self, idx):
-        base_ln = idx * self._batch_size
-        offset = self._batch_offsets[idx]
-        labels, texts = load_batch_from_tsv(self._data_path, base_ln, offset,
-                                            self._batch_size, self._options)
-        x, y = encode_data_re(texts, labels, self._tokenizer, self._max_seq_len,
-                           self._replace_span_A, self._replace_span_B, self._label_map, self._options)
-        return x, y
+#     def __getitem__(self, idx):
+#         base_ln = idx * self._batch_size
+#         offset = self._batch_offsets[idx]
+#         labels, texts = load_batch_from_tsv(self._data_path, base_ln, offset,
+#                                             self._batch_size, self._options)
+#         x, y = encode_data_re(texts, labels, self._tokenizer, self._max_seq_len,
+#                            self._replace_span_A, self._replace_span_B, self._label_map, self._options)
+#         return x, y
 
-    def __on_epoch_end__(self):
-        pass
+#     def __on_epoch_end__(self):
+#         pass
