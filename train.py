@@ -13,10 +13,9 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 from common import argument_parser, print_versions
 from common import load_pretrained, load_model, get_tokenizer, load_labels
 from common import load_dataset, train_tfrecord_input, TsvSequence
-from common import tokenize_texts, encode_tokenized, num_examples
+from common import num_examples
 from common import create_model, create_optimizer, save_model_etc
 from common import get_checkpoint_files, DeleteOldCheckpoints
-from common import load_dataset_re, tokenize_texts_re, encode_tokenized_re, TsvSequenceRE
 
 from config import CHECKPOINT_NAME
 
@@ -70,17 +69,15 @@ def main(argv):
     label_map = { l: i for i, l in enumerate(label_list) }
     inv_label_map = { v: k for k, v in label_map.items() }
 
+    if args.task_name not in (["NER","RE"]):
+        raise ValueError("Task not found: {}".format(args.task_name))
+
     if args.train_data[0].endswith('.tsv'):
         if len(args.train_data) > 1:
             raise NotImplementedError('Multiple TSV inputs')
-        if args.task_name == "NER":
-            train_data = TsvSequence(args.train_data[0], tokenizer, label_map,
-                                 global_batch_size, args)
-        elif args.task_name == "RE":
-            train_data = TsvSequenceRE(args.train_data[0], tokenizer, label_map,
-                                 global_batch_size, args)
-        else:
-            raise ValueError('Task Name must be NER or RE')
+
+        train_data = TsvSequence(args.train_data[0], tokenizer, label_map,
+                                global_batch_size, args)
         input_format = 'tsv'
     elif args.train_data[0].endswith('.tfrecord'):
         train_data = train_tfrecord_input(args.train_data, args.max_seq_length,
@@ -93,13 +90,8 @@ def main(argv):
         dev_x, dev_y = None, None
         validation_data = None
     else:
-        if args.task_name == "NER":
-            dev_x, dev_y = load_dataset(args.dev_data, tokenizer,
-                                    args.max_seq_length, args.replace_span,
-                                    label_map, args)
-        elif args.task_name == "RE":
-            dev_x, dev_y = load_dataset(args.dev_data, tokenizer,
-                                    args.max_seq_length, args.replace_span_A, args.replace_span_B,
+        dev_x, dev_y = load_dataset(args.dev_data, tokenizer,
+                                    args.max_seq_length,
                                     label_map, args)
         validation_data = (dev_x, dev_y)
 

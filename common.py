@@ -340,14 +340,15 @@ def create_optimizer(num_example, batch_size, options):
     )
     return optimizer
 
-def fix_unused_tokens(tokenized_text):
-    for i,v in enumerate(tokenized_text):
-        if tokenized_text[i:i+2] == ["unused", "##3"]:
+def fix_unused_tokens(tokenized_text_before):
+    tokenized_text=[]
+    for i,v in enumerate(tokenized_text_before):
+        if tokenized_text_before[i:i+2] == ["unused", "##3"]:
             tokenized_text.append("[unused3]")
             #remove the ##3 token from the list of tokens
-            tokenized_text.pop(i+1)
+            tokenized_text_before.pop(i+1)
         else:
-            tokenized_text.append(tokenized_text[i])
+            tokenized_text.append(tokenized_text_before[i])
     return tokenized_text
 
 def tokenize_texts_re(texts, tokenizer):
@@ -426,7 +427,7 @@ def encode_tokenized_re(tokenized_texts, tokenizer, seq_len, replace_span_A, rep
         if len(tokens) >= seq_len -1:
             tokens, chopped = tokens[:seq_len-1], tokens[seq_len-1:]
             #shows the chopped inputs, log files for 10M end up being 3gb because of that so I stopped logging that
-            #logging.warning('chopping tokens to {}: {} ///// {}'.format(max_seq_length-1, ' '.join(tokens), ' '.join(chopped)))
+            #print('chopping tokens to {}: {} ///// {}'.format(seq_len-1, ' '.join(tokens), ' '.join(chopped)))
         tokens.append('[SEP]')
         tokens.extend(['[PAD]'] * (seq_len-len(tokens)))
         segment_ids = []
@@ -459,7 +460,10 @@ def parse_tsv_line(l, ln, fn, options):
             '{} on {} line {}: {}'.format(len(fields), fn, ln, l)
         )
     label = fields[options.label_field]
-    text_end = positive_index(options.text_fields, fields) + 3
+    if options.task_name == "NER":
+        text_end = positive_index(options.text_fields, fields) + 3
+    else:
+        text_end = positive_index(options.text_fields, fields) + 5
     text = fields[options.text_fields:text_end]
     return label, text
 
@@ -486,12 +490,6 @@ def encode_data(texts, labels, tokenizer, max_seq_len, label_map,
         y = np.array([label_map[l] for l in labels])        
     return x, y
 
-# def encode_data_re(texts, labels, tokenizer, max_seq_len, replace_span_A, replace_span_B, label_map,
-#                 options):
-#     tokenized = tokenize_texts_re(texts, tokenizer)
-#     x = encode_tokenized_re(tokenized, tokenizer, max_seq_len, replace_span_A, replace_span_B)
-#     y = np.array([label_map[l] for l in labels])
-#     return x, y
 
 @timed
 def load_dataset(fn, tokenizer, max_seq_len, label_map, options):
@@ -499,11 +497,6 @@ def load_dataset(fn, tokenizer, max_seq_len, label_map, options):
     return encode_data(texts, labels, tokenizer, max_seq_len,
                        label_map, options)
 
-# @timed
-# def load_dataset_re(fn, tokenizer, max_seq_len, replace_span_A, replace_span_B, label_map, options):
-#     labels, texts = load_tsv_data(fn, options)
-#     return encode_data_re(texts, labels, tokenizer, max_seq_len, replace_span_A, replace_span_B,
-#                        label_map, options)
 
 @timed
 def load_batch_offsets(fn, batch_size):
@@ -533,7 +526,6 @@ def load_batch_from_tsv(fn, base_ln, offset, batch_size, options,
 
 def tsv_generator(data_path, tokenizer, label_map, options):
     max_seq_len = options.max_seq_length
-    replace_span = options.replace_span
     with open(data_path) as f:
         for ln, l in enumerate(f, start=1):
             label, text = parse_tsv_line(l, ln, data_path, options)
@@ -635,31 +627,3 @@ class TsvSequence(Sequence):
     def __on_epoch_end__(self):
         pass
 
-# class TsvSequenceRE(Sequence):
-#     def __init__(self, data_path, tokenizer, label_map, batch_size, options):
-#         self._data_path = data_path
-#         self._tokenizer = tokenizer
-#         self._label_map = label_map
-#         self._batch_size = batch_size
-#         self._max_seq_len = options.max_seq_length
-#         self._replace_span_A = options.replace_span_A
-#         self._replace_span_B = options.replace_span_B
-#         self._options = options
-#         offsets, total = load_batch_offsets(data_path, batch_size)
-#         self._batch_offsets = offsets
-#         self.num_examples = total
-
-#     def __len__(self):
-#         return len(self._batch_offsets)
-
-#     def __getitem__(self, idx):
-#         base_ln = idx * self._batch_size
-#         offset = self._batch_offsets[idx]
-#         labels, texts = load_batch_from_tsv(self._data_path, base_ln, offset,
-#                                             self._batch_size, self._options)
-#         x, y = encode_data_re(texts, labels, self._tokenizer, self._max_seq_len,
-#                            self._replace_span_A, self._replace_span_B, self._label_map, self._options)
-#         return x, y
-
-#     def __on_epoch_end__(self):
-#         pass
