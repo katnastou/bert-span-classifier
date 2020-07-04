@@ -2,7 +2,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
-#SBATCH --mem=8G
+#SBATCH --mem=32G
 #SBATCH -p gputest
 #SBATCH -t 00:15:00
 #SBATCH --gres=gpu:v100:1
@@ -67,6 +67,7 @@ module load cudnn
 source venv/bin/activate
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export NCCL_DEBUG=INFO
 
 echo "START $SLURM_JOBID: $(date)"
 
@@ -78,9 +79,9 @@ else
 fi
 echo "Using $train_data as training data" >&2
 
-$label_field = "-1"
+label_field=-1
 
-$text_fields = "3"
+text_fields=-6
 
 srun python3 train.py \
     --replace_span_A "[unused1]" \
