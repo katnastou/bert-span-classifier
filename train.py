@@ -16,6 +16,7 @@ from common import load_dataset, train_tfrecord_input, TsvSequence
 from common import tokenize_texts, encode_tokenized, num_examples
 from common import create_model, create_optimizer, save_model_etc
 from common import get_checkpoint_files, DeleteOldCheckpoints
+from common import load_dataset_re, tokenize_texts_re, encode_tokenized_re, TsvSequenceRE
 
 from config import CHECKPOINT_NAME
 
@@ -72,8 +73,14 @@ def main(argv):
     if args.train_data[0].endswith('.tsv'):
         if len(args.train_data) > 1:
             raise NotImplementedError('Multiple TSV inputs')
-        train_data = TsvSequence(args.train_data[0], tokenizer, label_map,
+        if args.task_name == "NER":
+            train_data = TsvSequence(args.train_data[0], tokenizer, label_map,
                                  global_batch_size, args)
+        elif args.task_name == "RE":
+            train_data = TsvSequenceRE(args.train_data[0], tokenizer, label_map,
+                                 global_batch_size, args)
+        else:
+            raise ValueError('Task Name must be NER or RE')
         input_format = 'tsv'
     elif args.train_data[0].endswith('.tfrecord'):
         train_data = train_tfrecord_input(args.train_data, args.max_seq_length,
@@ -86,8 +93,13 @@ def main(argv):
         dev_x, dev_y = None, None
         validation_data = None
     else:
-        dev_x, dev_y = load_dataset(args.dev_data, tokenizer,
+        if args.task_name == "NER":
+            dev_x, dev_y = load_dataset(args.dev_data, tokenizer,
                                     args.max_seq_length, args.replace_span,
+                                    label_map, args)
+        elif args.task_name == "RE":
+            dev_x, dev_y = load_dataset(args.dev_data, tokenizer,
+                                    args.max_seq_length, args.replace_span_A, args.replace_span_B,
                                     label_map, args)
         validation_data = (dev_x, dev_y)
 

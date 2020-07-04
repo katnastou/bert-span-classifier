@@ -63,6 +63,10 @@ def argument_parser(mode):
             help='Development data'
         )
         argparser.add_argument(
+            '--task_name', default="NER",
+            help='task to run, acceptable values NER and RE'
+        )
+        argparser.add_argument(
             '--vocab_file', required=True,
             help='Vocabulary file that BERT model was trained on'
         )
@@ -87,7 +91,7 @@ def argument_parser(mode):
             help='Lower case input text (for uncased models)'
         )
         argparser.add_argument(
-        '--learning_rate', type=float, default=DEFAULT_LR,
+            '--learning_rate', type=float, default=DEFAULT_LR,
             help='Initial learning rate'
         )
         argparser.add_argument(
@@ -101,6 +105,14 @@ def argument_parser(mode):
         argparser.add_argument(
             '--replace_span', default=None,
             help='Replace span text with given special token'
+        )
+        argparser.add_argument(
+            '--replace_span_A', default=None,
+            help='Replace span text with given special token for first entity in RE'
+        )
+        argparser.add_argument(
+            '--replace_span_B', default=None,
+            help='Replace span text with given special token for second entity in RE'
         )
         argparser.add_argument(
             '--checkpoint_dir', default='checkpoints',
@@ -328,6 +340,26 @@ def create_optimizer(num_example, batch_size, options):
     )
     return optimizer
 
+def fix_unused_tokens(tokenized_text):
+    for i,v in enumerate(tokenized_text):
+        if tokenized_text[i:i+2] == ["unused", "##3"]:
+            tokenized_text.append("[unused3]")
+            #remove the ##3 token from the list of tokens
+            tokenized_text.pop(i+1)
+        else:
+            tokenized_text.append(tokenized_text[i])
+    return tokenized_text
+
+def tokenize_texts_re(texts, tokenizer):
+    tokenized = []
+    for sent_start, entity1, text_between_ent_1_and_ent_2, entity2, sent_end in texts:
+        sent_start_tok = fix_unused_tokens(tokenizer.tokenize(sent_start))
+        entity1_tok = fix_unused_tokens(tokenizer.tokenize(entity1))
+        text_between_ent_1_and_ent_2_tok = fix_unused_tokens(tokenizer.tokenize(text_between_ent_1_and_ent_2))
+        entity2_tok = fix_unused_tokens(tokenizer.tokenize(entity2))
+        sent_end_tok = fix_unused_tokens(tokenizer.tokenize(sent_end))
+        tokenized.append([sent_start_tok, entity1_tok, text_between_ent_1_and_ent_2_tok, entity2_tok, sent_end_tok])
+    return tokenized
 
 def tokenize_texts(texts, tokenizer):
     tokenized = []
@@ -337,7 +369,6 @@ def tokenize_texts(texts, tokenizer):
         right_tok = tokenizer.tokenize(right)
         tokenized.append([left_tok, span_tok, right_tok])
     return tokenized
-
 
 def encode_tokenized(tokenized_texts, tokenizer, seq_len, replace_span):
     tids, sids = [], []
@@ -361,6 +392,51 @@ def encode_tokenized(tokenized_texts, tokenizer, seq_len, replace_span):
         tokens.append('[SEP]')
         tokens.extend(['[PAD]'] * (seq_len-len(tokens)))
         token_ids = tokenizer.convert_tokens_to_ids(tokens)
+        segment_ids = [0] * seq_len
+        tids.append(token_ids)
+        sids.append(segment_ids)
+    # Sanity check
+    assert all(len(t) == seq_len for t in tids)
+    assert all(len(s) == seq_len for s in sids)
+    return np.array(tids), np.array(sids)
+
+def encode_tokenized_re(tokenized_texts, tokenizer, seq_len, replace_span_A, replace_span_B):
+    tids, sids = [], []
+    for sent_start_tok, entity1_tok, text_between_ent_1_and_ent_2_tok, entity2_tok, sent_end_tok in tokenized_texts:
+        tokens = ['[CLS]']
+        center = int(seq_len/2)
+        if (len(sent_start_tok+entity1_tok)+int(round(len(text_between_ent_1_and_ent_2_tok)/2))) > center-1:
+            sent_start_tok = sent_start_tok[len(sent_start_tok+entity1_tok)+int(round(len(text_between_ent_1_and_ent_2_tok)/2))-(center-1):]
+        else:
+            sent_start_tok = ['[PAD]'] * ((center-1)-len(sent_start_tok+entity1_tok)+int(round(len(text_between_ent_1_and_ent_2_tok)/2))) + sent_start_tok
+        tokens.extend(sent_start_tok)
+
+        if not replace_span_A:
+            tokens.extend(entity1_tok)
+        else:
+            tokens.append(replace_span_A)
+        tokens.extend(text_between_ent_1_and_ent_2_tok)
+
+        if not replace_span_B:
+            tokens.extend(entity2_tok)
+        else:
+            tokens.append(replace_span_B)
+        tokens.extend(sent_end_tok)
+
+        if len(tokens) >= seq_len -1:
+            tokens, chopped = tokens[:seq_len-1], tokens[seq_len-1:]
+            #shows the chopped inputs, log files for 10M end up being 3gb because of that so I stopped logging that
+            #logging.warning('chopping tokens to {}: {} ///// {}'.format(max_seq_length-1, ' '.join(tokens), ' '.join(chopped)))
+        tokens.append('[SEP]')
+        tokens.extend(['[PAD]'] * (seq_len-len(tokens)))
+        segment_ids = []
+        token_ids = tokenizer.convert_tokens_to_ids(tokens)
+        input_mask = []
+        for token in tokens:
+            if token == "[PAD]":
+                input_mask.append(0)
+            else:
+                input_mask.append(1)
         segment_ids = [0] * seq_len
         tids.append(token_ids)
         sids.append(segment_ids)
@@ -405,6 +481,12 @@ def encode_data(texts, labels, tokenizer, max_seq_len, replace_span, label_map,
     y = np.array([label_map[l] for l in labels])
     return x, y
 
+def encode_data_re(texts, labels, tokenizer, max_seq_len, replace_span_A, replace_span_B, label_map,
+                options):
+    tokenized = tokenize_texts_re(texts, tokenizer)
+    x = encode_tokenized_re(tokenized, tokenizer, max_seq_len, replace_span_A, replace_span_B)
+    y = np.array([label_map[l] for l in labels])
+    return x, y
 
 @timed
 def load_dataset(fn, tokenizer, max_seq_len, replace_span, label_map, options):
@@ -412,6 +494,11 @@ def load_dataset(fn, tokenizer, max_seq_len, replace_span, label_map, options):
     return encode_data(texts, labels, tokenizer, max_seq_len, replace_span,
                        label_map, options)
 
+@timed
+def load_dataset_re(fn, tokenizer, max_seq_len, replace_span_A, replace_span_B, label_map, options):
+    labels, texts = load_tsv_data(fn, options)
+    return encode_data_re(texts, labels, tokenizer, max_seq_len, replace_span_A, replace_span_B,
+                       label_map, options)
 
 @timed
 def load_batch_offsets(fn, batch_size):
@@ -539,6 +626,35 @@ class TsvSequence(Sequence):
                                             self._batch_size, self._options)
         x, y = encode_data(texts, labels, self._tokenizer, self._max_seq_len,
                            self._replace_span, self._label_map, self._options)
+        return x, y
+
+    def __on_epoch_end__(self):
+        pass
+
+class TsvSequenceRE(Sequence):
+    def __init__(self, data_path, tokenizer, label_map, batch_size, options):
+        self._data_path = data_path
+        self._tokenizer = tokenizer
+        self._label_map = label_map
+        self._batch_size = batch_size
+        self._max_seq_len = options.max_seq_length
+        self._replace_span_A = options.replace_span_A
+        self._replace_span_B = options.replace_span_B
+        self._options = options
+        offsets, total = load_batch_offsets(data_path, batch_size)
+        self._batch_offsets = offsets
+        self.num_examples = total
+
+    def __len__(self):
+        return len(self._batch_offsets)
+
+    def __getitem__(self, idx):
+        base_ln = idx * self._batch_size
+        offset = self._batch_offsets[idx]
+        labels, texts = load_batch_from_tsv(self._data_path, base_ln, offset,
+                                            self._batch_size, self._options)
+        x, y = encode_data_re(texts, labels, self._tokenizer, self._max_seq_len,
+                           self._replace_span_A, self._replace_span_B, self._label_map, self._options)
         return x, y
 
     def __on_epoch_end__(self):
