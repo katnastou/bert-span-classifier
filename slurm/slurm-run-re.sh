@@ -68,6 +68,7 @@ source venv/bin/activate
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export NCCL_DEBUG=INFO
+TF_FORCE_GPU_ALLOW_GROWTH=true
 
 echo "START $SLURM_JOBID: $(date)"
 
